@@ -13,7 +13,7 @@ namespace Pathfinding2D
 
         Quadtree tree;
 
-        List<PathfindCell> path;
+        List<Vector2> path;
 
         private void Awake()
         {
@@ -21,7 +21,13 @@ namespace Pathfinding2D
             tree = new Quadtree(Area, Levels);
 
             /* Generate a path along the diagonal for testing */
-            GetPath(Area.min + Vector2.one, Area.max - Vector2.one);
+            GetPath(Area.min + Vector2.one, Area.max - Vector2.one, .5f);
+        }
+
+        private void Update()
+        {
+            tree = new Quadtree(Area, Levels);
+            GetPath(Area.min + Vector2.one, Area.max - Vector2.one, .5f);
         }
 
         /// <summary>
@@ -60,7 +66,7 @@ namespace Pathfinding2D
             return curr;
         }
 
-        public List<Vector2> GetPath(Vector2 startPosition, Vector2 endPosition)
+        public List<Vector2> GetPath(Vector2 startPosition, Vector2 endPosition, float agentRadius)
         {
             /* First get the cells for the start and end */
             Quadtree.QuadtreeNode start = GetNode(startPosition);
@@ -90,6 +96,8 @@ namespace Pathfinding2D
                 /* Update neighbor distances */
                 foreach(var neighbor in tree.GetNeighbors(next.node))
                 {
+                    if (neighbor.filled) continue; //we can't pathfind through filled nodes
+
                     PathfindCell neighborCell = cellDict.GetValueOrDefault(neighbor);
 
                     /* If the neighbor is in closed, ignore it */
@@ -114,6 +122,9 @@ namespace Pathfinding2D
                         cellDict.Add(neighbor, newCell);
                     }
                 }
+
+                /* Finally, restore the minheap property of the list */
+                open.Sort();
             }
 
             /* If we finished the loop and closed does not contain the endpoint, it is not reachable */
@@ -130,15 +141,71 @@ namespace Pathfinding2D
             while(final.node != start)
             {
                 final = final.prev;
-                cells.Add(final);
+                cells.Insert(0, final);
             }
 
             /* We now have a complete node path */
-            Debug.Log("PATH: ");
-            Debug.Log(string.Join(",\n", cells));
-            path = cells;
+            /* Generate an initial list of waypoints */
+            path = new List<Vector2>();
+            path.Add(startPosition);
+            for(int i = 0; i < cells.Count; i++)
+            {
+                path.Add(cells[i].node.area.center);
+            }
+            path.Add(endPosition);
+
+
+            /* Smooth the path using a simple line of sight algorithm */
+            SmoothPath(path);
 
             return null;
+        }
+
+        void SmoothPath(List<Vector2> path, float radius)
+        {
+            if (path.Count <= 2) return; //no smoothing possible
+
+            int checkPointIndex = 0;
+            int currentPointIndex = 1;
+            while(currentPointIndex < path.Count - 1)
+            {
+                /* Is the route walkable between checkPoint and currentPoint.next */
+                Vector2 direction = path[currentPointIndex + 1] - path[checkPointIndex];
+                if (Physics2D.CircleCast(path[checkPointIndex], radius, direction.normalized, direction.magnitude).collider == null)
+                {
+                    /* The intermediate point is unnecessary */
+                    path.RemoveAt(currentPointIndex);
+                }
+                else
+                {
+                    /* There is no straight line */
+                    checkPointIndex++;
+                    currentPointIndex++;
+                }
+            }
+        }
+
+        void SmoothPath(List<Vector2> path)
+        {
+            if (path.Count <= 2) return; //no smoothing possible
+
+            int checkPointIndex = 0;
+            int currentPointIndex = 1;
+            while (currentPointIndex < path.Count - 1)
+            {
+                /* Is the route walkable between checkPoint and currentPoint.next */
+                if (Physics2D.Linecast(path[checkPointIndex], path[currentPointIndex + 1]).collider == null)
+                {
+                    /* The intermediate point is unnecessary */
+                    path.RemoveAt(currentPointIndex);
+                }
+                else
+                {
+                    /* There is no straight line */
+                    checkPointIndex++;
+                    currentPointIndex++;
+                }
+            }
         }
 
         private void OnDrawGizmos()
@@ -161,7 +228,7 @@ namespace Pathfinding2D
                 Gizmos.color = Color.magenta;
                 for (int i = 0; i < path.Count - 1; i++)
                 {
-                    Gizmos.DrawLine(path[i].node.area.center, path[i+1].node.area.center);
+                    Gizmos.DrawLine(path[i], path[i+1]);
                 }
             }
         }
