@@ -9,173 +9,175 @@ namespace Pathfinding2D
     {
         [Header("Scale")]
         public Rect Area;
-        public float Resolution;
+        public int Levels;
 
-        NavGridCell[,] Grid;
-        Vector2 RectSize;
-        Vector2Int Size;
-
-        List<NavGridCell> path;
         Quadtree tree;
 
-        List<Quadtree.QuadtreeNode> leaves = new List<Quadtree.QuadtreeNode>();
-        List<Quadtree.QuadtreeNode> nodes = new List<Quadtree.QuadtreeNode>();
+        List<PathfindCell> path;
 
         private void Awake()
         {
             /* Generate a quadtree */
-            tree = new Quadtree(Area, 6);
-            Debug.Log(tree.tree.Keys.Count);
+            tree = new Quadtree(Area, Levels);
 
-            /* Store the leaves */
-            foreach(var node in tree.tree.Values)
-            {
-                if(node.isLeaf) leaves.Add(node);
-            }
-
-            /* Find a leaf node and mark its neighbors */
-            nodes.Add(leaves[UnityEngine.Random.Range(0, leaves.Count)]);
-            foreach (var neighbor in tree.GetNeighbors(nodes[0]))
-            {
-                nodes.Add(neighbor);
-            }
+            /* Generate a path along the diagonal for testing */
+            GetPath(Area.min + Vector2.one, Area.max - Vector2.one);
         }
 
-        public NavGridCell GetCell(Vector2 position)
+        /// <summary>
+        /// Get the quadtree leaf associated with a given position.
+        /// </summary>
+        /// <param name="position"></param>
+        /// <returns></returns>
+        public Quadtree.QuadtreeNode GetNode(Vector2 position)
         {
-            Vector2Int index = Vector2Int.FloorToInt((position + Area.min) / RectSize);
-            return Grid[index.x, index.y];
-        }
+            /* if the position is outside of the mapped area, return null */
+            if (!Area.Contains(position)) return null;
 
-        public List<NavGridCell> GetCellPath(NavGridCell start, NavGridCell end)
-        {
-            /* Perform an A* search to get the path */
-            List<PathfindCell> Open = new List<PathfindCell>();
-            List<PathfindCell> Closed = new List<PathfindCell>();
-
-            /* Add the starter node */
-            Open.Add(new PathfindCell { cell = start, distance = 0, prev = null});
-            Open[0].InitializeHeuristic(end.Position);
-
-            /* Perform A* */
-            while(Open.Count > 0)
+            /* Recursively move down the tree */
+            Quadtree.QuadtreeNode curr = tree.tree[1];
+            while (!curr.isLeaf)
             {
-                /* Pop the lowest distance item and close it*/
-                PathfindCell next = Open[0];
-                Open.RemoveAt(0);
-                Closed.Add(next);
-                //Debug.Log("Next: " + next);
-
-                /* If next was our target, we can terminate early */
-                if (next.cell == end) break;
-
-                /* Add neighbors or update distances accordingly */
-                foreach (var neighbor in GetNeighbors(next.cell))
+                /* Find the correct child */
+                if (tree.tree[curr.GetChild(0)].area.Contains(position))
                 {
-                    if (neighbor.Closed) continue;
-                    PathfindCell pCell = Closed.Find(c => c.cell == neighbor);
-                    if (pCell != null) continue;
-                    pCell = Open.Find(c => c.cell == neighbor);
-                    
-                    if(pCell != null)
+                    curr = tree.tree[curr.GetChild(0)];
+                }
+                else if (tree.tree[curr.GetChild(1)].area.Contains(position))
+                {
+                    curr = tree.tree[curr.GetChild(1)];
+                }
+                else if (tree.tree[curr.GetChild(2)].area.Contains(position))
+                {
+                    curr = tree.tree[curr.GetChild(2)];
+                }
+                else
+                {
+                    curr = tree.tree[curr.GetChild(3)];
+                }
+            }
+
+            return curr;
+        }
+
+        public List<Vector2> GetPath(Vector2 startPosition, Vector2 endPosition)
+        {
+            /* First get the cells for the start and end */
+            Quadtree.QuadtreeNode start = GetNode(startPosition);
+            Quadtree.QuadtreeNode end = GetNode(endPosition);
+
+            /* Perform an A* pathfind between the two nodes */
+            List<PathfindCell> open = new List<PathfindCell>();
+            List<PathfindCell> closed = new List<PathfindCell>();
+            Dictionary<Quadtree.QuadtreeNode, PathfindCell> cellDict = new Dictionary<Quadtree.QuadtreeNode, PathfindCell>();
+
+            /* Add the starting node */
+            open.Add(new PathfindCell(start, end.area.center, null));
+            cellDict.Add(start, open[0]);
+            open[0].distance = 0.0f;
+
+            /* Perform the A* Algorithm */
+            while(open.Count > 0)
+            {
+                /* Get the next node */
+                PathfindCell next = open[0];
+                open.RemoveAt(0);
+                closed.Add(next);
+
+                /* If this node is our target, we can terminate early */
+                if (next.node == end) break;
+
+                /* Update neighbor distances */
+                foreach(var neighbor in tree.GetNeighbors(next.node))
+                {
+                    PathfindCell neighborCell = cellDict.GetValueOrDefault(neighbor);
+
+                    /* If the neighbor is in closed, ignore it */
+                    if (closed.Contains(neighborCell)) continue;
+
+                    /* If the neighbor is in open, update it */
+                    /* Otherwise make a new pathfind node */
+                    float delta = Vector2.Distance(next.node.area.center, neighbor.area.center);
+                    if (neighborCell != null)
                     {
-                        /* The cell is open, update its distance if smaller */
-                        float distanceChange = Vector2.Distance(pCell.cell.Position, next.cell.Position);
-                        if (pCell.distance > next.distance + distanceChange)
+                        if(neighborCell.distance > delta + next.distance)
                         {
-                            pCell.prev = next;
-                            pCell.distance = next.distance + distanceChange;
+                            neighborCell.distance = delta + next.distance;
+                            neighborCell.prev = next;
                         }
                     }
                     else
                     {
-                        /* This cell is unexplored. Add it */
-                        Open.Add(new PathfindCell { cell = neighbor, prev = next, distance = next.distance + Vector2.Distance(neighbor.Position, next.cell.Position) });
-                        Open[Open.Count - 1].InitializeHeuristic(end.Position);
+                        PathfindCell newCell = new PathfindCell(neighbor, end.area.center, next);
+                        newCell.distance = next.distance + delta;
+                        open.Add(newCell);
+                        cellDict.Add(neighbor, newCell);
                     }
                 }
-
-                /* Sort the queue for the next round */
-                Open.Sort();
             }
 
-            /* Generate a path based on the pathfind cells */
-            List<NavGridCell> ret = new List<NavGridCell>();
-            PathfindCell last = Closed[Closed.Count - 1];
-            ret.Add(last.cell);
-            while(last.cell != start)
+            /* If we finished the loop and closed does not contain the endpoint, it is not reachable */
+            PathfindCell final = closed.Find(c => c.node == end);
+            if(final == null)
             {
-                last = last.prev;
-                ret.Insert(0, last.cell);
+                Debug.LogError("Unable to find path.");
+                return null;
             }
 
-            /* Return the final cells */
-            return ret;
-        }
-        
-        /// <summary>
-        /// Get the neighbors for a given cell.
-        /// </summary>
-        /// <param name="source"></param>
-        /// <returns></returns>
-        private List<NavGridCell> GetNeighbors(NavGridCell source)
-        {
-            List<NavGridCell> ret = new List<NavGridCell>();
-            
-            for(int dx = -1; dx <= 1; dx++)
+            /* A* Complete. Find the cell path */
+            List<PathfindCell> cells = new List<PathfindCell>();
+            cells.Add(final);
+            while(final.node != start)
             {
-                for(int dy = -1; dy <= 1; dy++)
-                {
-                    /* Don't return the cell */
-                    if (dx == 0 && dy == 0) continue;
-
-                    /* If we are in bounds return our neighbor */
-                    Vector2Int index = source.Position + new Vector2Int(dx, dy);
-                    if (index.x < 0 || index.y < 0 || index.x >= Size.x || index.y >= Size.y) continue;
-                    ret.Add(Grid[index.x, index.y]);
-                }
+                final = final.prev;
+                cells.Add(final);
             }
 
-            return ret;
+            /* We now have a complete node path */
+            Debug.Log("PATH: ");
+            Debug.Log(string.Join(",\n", cells));
+            path = cells;
+
+            return null;
         }
 
         private void OnDrawGizmos()
         {
-            /* Display all leaf octree nodes */
             if(tree != null)
             {
-                foreach (var node in leaves)
+                /* Draw the nodes */
+                foreach (var node in tree.tree.Values)
                 {
-                    GizmoExtensions.DrawSquare(node.area, node.filled ? Color.red : Color.green);
-                }
-
-                /* Redraw in purple the neighbor nodes nodes */
-                for (int i = 0; i < nodes.Count; i++)
-                {
-                    if(i == 0)
+                    if (node.isLeaf)
                     {
-                        GizmoExtensions.DrawSquare(nodes[i].area, Color.yellow);
-                    }
-                    else
-                    {
-                        GizmoExtensions.DrawSquare(nodes[i].area, Color.magenta);
+                        GizmoExtensions.DrawSquare(node.area, Color.green);
                     }
                 }
             }
-            
-            
+
+            /* Draw the current path */
+            if (path != null)
+            {
+                Gizmos.color = Color.magenta;
+                for (int i = 0; i < path.Count - 1; i++)
+                {
+                    Gizmos.DrawLine(path[i].node.area.center, path[i+1].node.area.center);
+                }
+            }
         }
 
         private class PathfindCell : IComparable<PathfindCell>
         {
-            public NavGridCell cell;
+            public Quadtree.QuadtreeNode node;
             public float distance;
             public float heuristic;
             public PathfindCell prev;
 
-            public void InitializeHeuristic(Vector2Int target)
+            public PathfindCell(Quadtree.QuadtreeNode node, Vector2 target, PathfindCell prev = null)
             {
-                heuristic = Vector2Int.Distance(target, cell.Position);
+                this.node = node;
+                this.heuristic = Vector2.Distance(node.area.center, target);
+                this.prev = prev;
             }
 
             public int CompareTo(PathfindCell other)
@@ -185,33 +187,8 @@ namespace Pathfinding2D
 
             public override string ToString()
             {
-                return "Cell: " + cell.Position
-                    + " Dist: " + distance;
+                return "Cell: " + node.area + " Dist: " + distance;
             }
-        }
-    }
-
-    public class NavGridCell
-    {
-        public Rect Area;
-        public bool Closed;
-        public Vector2Int Position;
-
-        public override bool Equals(object obj)
-        {
-            return obj is NavGridCell cell &&
-                   Area.Equals(cell.Area) &&
-                   Closed == cell.Closed;
-        }
-
-        public override int GetHashCode()
-        {
-            return HashCode.Combine(Area, Closed);
-        }
-
-        public override string ToString()
-        {
-            return "Cell " + Position + " Rect: " + Area;
         }
     }
 }
