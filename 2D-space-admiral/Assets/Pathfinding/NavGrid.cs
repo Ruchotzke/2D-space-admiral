@@ -9,7 +9,8 @@ namespace Pathfinding2D
     {
         [Header("Scale")]
         public Rect Area;
-        public int Levels;
+        public Vector2 MinimumSize;
+        int Levels;
 
         Quadtree tree;
 
@@ -17,6 +18,15 @@ namespace Pathfinding2D
 
         private void Awake()
         {
+            /* First calculate how many levels are possible */
+            Levels = 0;
+            Vector2 size = Area.size / 2;
+            while(size.x >= MinimumSize.x && size.y >= MinimumSize.y)
+            {
+                Levels += 1;
+                size /= 2.0f;
+            }
+
             /* Generate a quadtree */
             tree = new Quadtree(Area, Levels);
 

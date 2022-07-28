@@ -492,8 +492,8 @@ MonoBehaviour:
     x: -10
     y: -6
     width: 20
-    height: 12
-  Levels: 5
+    height: 20
+  MinimumSize: {x: 0.1, y: 0.1}
 --- !u!1 &619394800
 GameObject:
   m_ObjectHideFlags: 0
